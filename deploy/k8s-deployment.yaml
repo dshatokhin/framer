@@ -1,0 +1,77 @@
+# Kubernetes Deployment for Framer - Are.na to Samsung Frame TV Sync
+# This deployment runs the framer sync script continuously with configurable intervals.
+#
+# Before applying:
+# 1. Update SMARTTHING_TV_IP_ADDRESS with your TV's IP address
+# 2. Set ARENA_SOURCE_CHANNEL_SLUG to your Are.na source channel slug
+# 3. Create the framer-secrets Secret with your Are.na API token:
+#    kubectl create secret generic framer-secrets --from-literal=arena-token='your-arena-api-token'
+#
+# Network Considerations:
+# - If your TV is on the same network as your Kubernetes nodes, you may need to use hostNetwork: true
+#   (uncomment the hostNetwork line below) or configure appropriate network policies.
+# - The script needs to reach both the Samsung TV (local network) and Are.na API (internet).
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: framer
+  labels:
+    app: framer
+    component: arena-tv-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: framer
+      component: arena-tv-sync
+  template:
+    metadata:
+      labels:
+        app: framer
+        component: arena-tv-sync
+    spec:
+      containers:
+        - name: framer
+          image: ghcr.io/dshatokhin/framer:latest
+          imagePullPolicy: Always
+          env:
+            - name: SMARTTHING_TV_IP_ADDRESS
+              value: "10.100.0.30" # REQUIRED: Replace with your Samsung Frame TV IP address
+            - name: ARENA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: framer-secrets
+                  key: arena-token
+            - name: ARENA_CHANNEL_SLUG
+              value: "the_frame" # Storage channel for mappings (default: "the_frame")
+            # - name: ARENA_SOURCE_CHANNEL_SLUG
+            #   value: ""  # REQUIRED: Source channel slug for image blocks
+            - name: SYNC_INTERVAL
+              value: "300" # Sync interval in seconds (default: 300)
+            - name: SYNC_ONCE
+              value: "false" # Set to "true" for single sync mode, "false" for continuous
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+---
+# Secret for sensitive configuration (Are.na API token)
+# Create with: kubectl create secret generic framer-secrets --from-literal=arena-token='your-arena-api-token'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: framer-secrets
+type: Opaque
+data:
+  # Base64-encoded Are.na API token
+  # Encode with: echo -n "your-arena-api-token" | base64
+  arena-token: "" # REQUIRED: Add your base64-encoded Are.na token here

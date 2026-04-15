@@ -1,0 +1,8 @@
+# Requirements for Samsung Frame TV Art Uploader
+#
+# Install with: pip install -r requirements.txt
+
+samsungtvws @ git+https://github.com/NickWaterton/samsung-tv-ws-api.git
+requests>=2.25.0
+Pillow>=10.0.0
+typing_extensions>=4.0.0

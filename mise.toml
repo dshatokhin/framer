@@ -1,0 +1,21 @@
+# mise.toml for Framer - Samsung Frame TV Art Uploader
+# Replaces Makefile with mise tasks
+
+[tasks.build]
+description = "Build Docker image"
+run = """
+echo "Building Docker image..."
+docker build -t ghcr.io/dshatokhin/framer:latest .
+"""
+
+[tasks.run]
+description = "Run Docker container locally"
+run = """
+echo "Running Docker container..."
+if [ -f .env ]; then
+  docker run --rm --env-file .env ghcr.io/dshatokhin/framer:latest --once
+else
+  echo "Error: .env file not found. Create .env file with required variables."
+  exit 1
+fi
+"""
