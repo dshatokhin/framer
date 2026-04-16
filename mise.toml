@@ -19,3 +19,15 @@ else
   exit 1
 fi
 """
+
+[tasks.init]
+description = "Initialize Are.na channels and blocks (requires .env file)"
+run = """
+echo "Initializing Are.na channels and blocks..."
+if [ -f .env ]; then
+  docker run --rm --env-file .env ghcr.io/dshatokhin/framer:latest --init
+else
+  echo "Error: .env file not found. Create .env file with required variables."
+  exit 1
+fi
+"""

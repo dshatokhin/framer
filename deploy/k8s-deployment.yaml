@@ -44,7 +44,7 @@ spec:
                   name: framer-secrets
                   key: arena-token
             - name: ARENA_CHANNEL_SLUG
-              value: "the_frame" # Storage channel for mappings (default: "the_frame")
+              value: "framer" # Storage channel for mappings (default: "framer")
             # - name: ARENA_SOURCE_CHANNEL_SLUG
             #   value: ""  # REQUIRED: Source channel slug for image blocks
             - name: SYNC_INTERVAL

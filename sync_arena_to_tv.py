@@ -27,18 +27,34 @@ logger = logging.getLogger(__name__)
 ARENA_API_BASE = "https://api.are.na/v3"
 
 
+def clean_slug_value(value: str) -> str:
+    """Clean slug value by stripping whitespace and surrounding quotes"""
+    if not value:
+        return value
+    # Strip whitespace first
+    value = value.strip()
+    # Strip surrounding quotes if present
+    if len(value) >= 2:
+        if (value[0] == '"' and value[-1] == '"') or (
+            value[0] == "'" and value[-1] == "'"
+        ):
+            value = value[1:-1]
+    return value
+
+
 # Parse channel slugs with optional defaults
 def _get_channel_slug(env_var: str, default: Optional[str] = None) -> Optional[str]:
     value = os.getenv(env_var)
-    if value and value.strip():
-        return value.strip()
+    if value:
+        return clean_slug_value(value)
     return default
 
 
-ARENA_CHANNEL_SLUG = _get_channel_slug("ARENA_CHANNEL_SLUG", "the_frame")
+ARENA_CHANNEL_SLUG = _get_channel_slug("ARENA_CHANNEL_SLUG", "framer")
 ARENA_SOURCE_CHANNEL_SLUG = _get_channel_slug("ARENA_SOURCE_CHANNEL_SLUG")
 ARENA_MAPPING_BLOCK_TITLE = "ARENA_TV_MAPPINGS"
 ARENA_SOURCE_CHANNEL_BLOCK_TITLE = "ARENA_SOURCE_CHANNEL_SLUG"
+ARENA_SOURCE_CHANNEL_PLACEHOLDER = "your-source-channel-slug"
 
 
 def get_arena_token() -> str:
@@ -46,6 +62,13 @@ def get_arena_token() -> str:
     token = os.getenv("ARENA_TOKEN")
     if not token:
         logger.error("ARENA_TOKEN environment variable not set")
+        sys.exit(1)
+    # Clean the token (strip whitespace and quotes)
+    token = clean_slug_value(token)
+    if not token:
+        logger.error(
+            "ARENA_TOKEN environment variable is empty after cleaning (may be just whitespace or quotes)"
+        )
         sys.exit(1)
     return token
 
@@ -57,6 +80,23 @@ def get_auth_headers(token: str) -> Dict[str, str]:
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
+
+
+def parse_error_response(response_text: str) -> str:
+    """Parse Are.na API error response to extract meaningful message"""
+    try:
+        error_data = json.loads(response_text)
+        error_msg = error_data.get("error", "Unknown error")
+        details = error_data.get("details", {})
+        detail_msg = details.get("message", "")
+        if detail_msg:
+            return f"{error_msg}: {detail_msg}"
+        return error_msg
+    except (json.JSONDecodeError, AttributeError):
+        # Not JSON, return truncated text
+        if len(response_text) > 200:
+            return response_text[:200] + "..."
+        return response_text
 
 
 async def get_channel_id(slug: str, token: str) -> Optional[int]:
@@ -80,7 +120,8 @@ async def get_channel_id(slug: str, token: str) -> Optional[int]:
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to get channel info: {e}")
         if hasattr(e, "response") and e.response:
-            logger.error(f"Response: {e.response.status_code} - {e.response.text}")
+            error_msg = parse_error_response(e.response.text)
+            logger.error(f"Response: {e.response.status_code} - {error_msg}")
         return None
 
 
@@ -88,7 +129,7 @@ async def find_mapping_block(channel_id: int, token: str) -> Optional[Dict[str, 
     """Find existing mapping block in channel"""
     try:
         headers = get_auth_headers(token)
-        url = f"{ARENA_API_BASE}/channels/{channel_id}/contents"
+        url = f"{ARENA_API_BASE}/channels/{channel_id}/contents?per=100"
 
         logger.info(f"Searching for mapping block in channel {channel_id}...")
         response = requests.get(url, headers=headers, timeout=30)
@@ -117,7 +158,7 @@ async def find_text_block_by_title(
     """Find text block by title in channel"""
     try:
         headers = get_auth_headers(token)
-        url = f"{ARENA_API_BASE}/channels/{channel_id}/contents"
+        url = f"{ARENA_API_BASE}/channels/{channel_id}/contents?per=100"
 
         logger.debug(
             f"Searching for text block with title '{title}' in channel {channel_id}..."
@@ -175,7 +216,7 @@ async def get_source_channel_slug_from_block(
             return default_slug
 
         # The block should contain just the slug string
-        slug = block_value.strip()
+        slug = clean_slug_value(block_value)
         logger.info(f"Using source channel slug from Are.na block: {slug}")
         return slug
 
@@ -301,9 +342,8 @@ async def save_mappings_to_arena(
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to save mappings to Are.na: {e}")
         if hasattr(e, "response") and e.response:
-            logger.error(
-                f"Response: {e.response.status_code} - {e.response.text[:200]}"
-            )
+            error_msg = parse_error_response(e.response.text)
+            logger.error(f"Response: {e.response.status_code} - {error_msg}")
         return False
     except Exception as e:
         logger.error(f"Failed to save mappings: {e}")
@@ -324,6 +364,251 @@ def find_mapping_by_tv_id(tv_id, mappings):
         if mapping.get("tv_id") == tv_id:
             return mapping
     return None
+
+
+async def create_channel(slug: str, title: str, token: str) -> Optional[int]:
+    """Create a new Are.na channel if it doesn't exist"""
+    try:
+        # First check if channel already exists
+        existing_id = await get_channel_id(slug, token)
+        if existing_id:
+            logger.info(f"Channel '{slug}' already exists (ID: {existing_id})")
+            return existing_id
+
+        # Create new channel
+        headers = get_auth_headers(token)
+        url = f"{ARENA_API_BASE}/channels"
+
+        payload = {
+            "title": title,
+            "slug": slug,
+            "visibility": "private",
+        }
+
+        logger.info(f"Creating channel '{slug}' with title '{title}'...")
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+
+        channel_data = response.json()
+        channel_id = channel_data.get("id")
+        if channel_id is None:
+            logger.error("Channel creation response missing 'id' field")
+            return None
+
+        logger.info(f"✓ Created channel '{slug}' (ID: {channel_id})")
+        return channel_id
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to create channel '{slug}': {e}")
+        if hasattr(e, "response") and e.response:
+            error_msg = parse_error_response(e.response.text)
+            logger.error(f"Response: {e.response.status_code} - {error_msg}")
+        return None
+    except Exception as e:
+        logger.error(f"Failed to create channel: {e}")
+        return None
+
+
+async def create_or_update_text_block(
+    channel_id: int, title: str, content: str, token: str
+) -> bool:
+    """Create or update a text block in a channel"""
+    try:
+        headers = get_auth_headers(token)
+
+        # Check if block already exists
+        existing_block = await find_text_block_by_title(channel_id, token, title)
+
+        if existing_block:
+            # Update existing block
+            block_id = existing_block.get("id")
+            url = f"{ARENA_API_BASE}/blocks/{block_id}"
+
+            payload = {"title": title, "content": content}
+
+            logger.info(f"Updating text block '{title}' (ID: {block_id})...")
+            response = requests.put(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+
+            logger.info(f"✓ Updated text block '{title}'")
+            return True
+        else:
+            # Create new block
+            url = f"{ARENA_API_BASE}/blocks"
+
+            payload = {
+                "title": title,
+                "value": content,
+                "channel_ids": [channel_id],
+            }
+
+            logger.info(f"Creating text block '{title}' in channel {channel_id}...")
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+
+            block_data = response.json()
+            block_id = block_data.get("id")
+            logger.info(f"✓ Created text block '{title}' (ID: {block_id})")
+            return True
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to create/update text block '{title}': {e}")
+        if hasattr(e, "response") and e.response:
+            error_msg = parse_error_response(e.response.text)
+            logger.error(f"Response: {e.response.status_code} - {error_msg}")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to create/update text block: {e}")
+        return False
+
+
+async def ensure_empty_mapping_block(
+    channel_id: int, source_channel_slug: str, token: str
+) -> bool:
+    """Ensure mapping block exists with empty mappings and correct source channel slug"""
+    # Warn if using placeholder
+    if source_channel_slug == ARENA_SOURCE_CHANNEL_PLACEHOLDER:
+        logger.warning(
+            f"Creating mapping block with placeholder source channel slug: '{source_channel_slug}'"
+        )
+
+    # Load existing mappings (if any)
+    mappings, _ = await load_mappings_from_arena(channel_id, token)
+
+    # Save mappings (empty or existing) with current source channel slug
+    # This will create block if it doesn't exist
+    success = await save_mappings_to_arena(
+        mappings, channel_id, token, source_channel_slug
+    )
+
+    if success:
+        if not mappings:
+            logger.info(
+                f"✓ Created/verified empty mapping block for source channel '{source_channel_slug}'"
+            )
+        else:
+            logger.info(f"✓ Verified existing mapping block ({len(mappings)} mappings)")
+    else:
+        logger.error("Failed to create/verify mapping block")
+
+    return success
+
+
+async def init_arena_channels() -> bool:
+    """Initialize Are.na channels and blocks for the sync system"""
+    logger.info("🚀 Initializing Are.na channels and blocks...")
+
+    # Get Are.na token
+    token = get_arena_token()
+
+    # Get configuration
+    storage_channel_slug = ARENA_CHANNEL_SLUG
+    source_channel_slug = ARENA_SOURCE_CHANNEL_SLUG
+    using_placeholder = False
+
+    # Use placeholder if source channel slug is not set
+    if not source_channel_slug:
+        source_channel_slug = ARENA_SOURCE_CHANNEL_PLACEHOLDER
+        using_placeholder = True
+        logger.warning(
+            "ARENA_SOURCE_CHANNEL_SLUG not set, using placeholder value. "
+            "Please update the 'ARENA_SOURCE_CHANNEL_SLUG' text block in the storage channel "
+            "with your actual source channel slug."
+        )
+    elif source_channel_slug == ARENA_SOURCE_CHANNEL_PLACEHOLDER:
+        using_placeholder = True
+        logger.warning(
+            "ARENA_SOURCE_CHANNEL_SLUG is set to placeholder value. "
+            "Please update it with your actual source channel slug or "
+            f"update the '{ARENA_SOURCE_CHANNEL_BLOCK_TITLE}' text block in the storage channel."
+        )
+
+    logger.info(f"Storage Channel Slug: {storage_channel_slug}")
+    logger.info(f"Source Channel Slug: {source_channel_slug}")
+    logger.info("=" * 50)
+
+    # 1. Create/verify storage channel
+    logger.info("Step 1: Creating/verifying storage channel...")
+    storage_channel_id = await create_channel(
+        storage_channel_slug, f"Framer TV Sync (Storage)", token
+    )
+    if not storage_channel_id:
+        logger.error("Failed to create/verify storage channel")
+        return False
+
+    # 2. Verify source channel exists (but don't create it - user should create it with their images)
+    logger.info("Step 2: Verifying source channel exists...")
+    source_channel_id = await get_channel_id(source_channel_slug, token)
+    if not source_channel_id:
+        logger.warning(
+            f"⚠️ Source channel '{source_channel_slug}' doesn't exist yet.\n"
+            f"   Please create it at: https://are.na/new\n"
+            f"   You'll add your images to this channel later."
+        )
+        # Continue anyway - user can create it later
+        source_channel_exists = False
+    else:
+        source_channel_exists = True
+        logger.info(f"✓ Source channel exists (ID: {source_channel_id})")
+
+    # 3. Create source channel slug block
+    logger.info("Step 3: Creating source channel configuration block...")
+    if not await create_or_update_text_block(
+        storage_channel_id, ARENA_SOURCE_CHANNEL_BLOCK_TITLE, source_channel_slug, token
+    ):
+        logger.error("Failed to create source channel configuration block")
+        return False
+
+    # 4. Create empty mapping block
+    logger.info("Step 4: Creating empty mapping block...")
+    if not await ensure_empty_mapping_block(
+        storage_channel_id, source_channel_slug, token
+    ):
+        logger.error("Failed to create empty mapping block")
+        return False
+
+    # Success!
+    logger.info("=" * 50)
+    logger.info("✅ Initialization complete!")
+
+    if using_placeholder:
+        logger.warning("")
+        logger.warning("⚠️  IMPORTANT: Using placeholder source channel slug!")
+        logger.warning(f"   Current value: '{source_channel_slug}'")
+        logger.warning("   Before running sync, update the text block titled")
+        logger.warning(
+            f"   '{ARENA_SOURCE_CHANNEL_BLOCK_TITLE}' in the storage channel"
+        )
+        logger.warning(f"   with your actual source channel slug.")
+        logger.warning("")
+
+    logger.info("")
+    logger.info(
+        f"Storage Channel (configuration): https://are.na/channel/{storage_channel_slug}"
+    )
+    if source_channel_exists:
+        logger.info(
+            f"Source Channel (add your images here): https://are.na/channel/{source_channel_slug}"
+        )
+    else:
+        logger.info(
+            f"Source Channel (to be created): https://are.na/channel/{source_channel_slug}"
+        )
+    logger.info("")
+    logger.info("Next steps:")
+    logger.info(
+        f"1. {'Add images to your source channel' if source_channel_exists else 'Create your source channel and add images'}"
+    )
+    logger.info(f"   URL: https://are.na/channel/{source_channel_slug}")
+    logger.info("2. Run the sync script:")
+    logger.info(f"   python sync_arena_to_tv.py")
+    logger.info("")
+    logger.info("Configuration details:")
+    logger.info(f"   - Storage channel slug: {storage_channel_slug}")
+    logger.info(f"   - Source channel slug: {source_channel_slug}")
+    logger.info(f"   - Both stored in: https://are.na/channel/{storage_channel_slug}")
+
+    return True
 
 
 def add_mapping(arena_block_id, arena_title, tv_id, mappings):
@@ -355,7 +640,7 @@ async def load_arena_blocks_from_channel(
     """Load Arena blocks from channel (excluding mapping block)"""
     try:
         headers = get_auth_headers(token)
-        url = f"{ARENA_API_BASE}/channels/{channel_id}/contents"
+        url = f"{ARENA_API_BASE}/channels/{channel_id}/contents?per=100"
 
         logger.info(f"Fetching blocks from Are.na channel {channel_id}...")
         response = requests.get(url, headers=headers, timeout=30)
@@ -363,6 +648,15 @@ async def load_arena_blocks_from_channel(
 
         blocks_data = response.json()
         all_blocks = blocks_data.get("data", [])
+
+        # Check pagination metadata
+        meta = blocks_data.get("meta", {})
+        if meta.get("has_more_pages", False):
+            logger.warning(
+                f"Channel has more than {len(all_blocks)} blocks. "
+                f"Only fetching first 100 blocks (page {meta.get('current_page', 1)} of {meta.get('total_pages', '?')}). "
+                "Consider reducing the number of images in your source channel."
+            )
 
         # Filter out mapping block and non-image blocks
         image_blocks = []
@@ -384,9 +678,8 @@ async def load_arena_blocks_from_channel(
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to fetch Arena blocks: {e}")
         if hasattr(e, "response") and e.response:
-            logger.error(
-                f"Response: {e.response.status_code} - {e.response.text[:200]}"
-            )
+            error_msg = parse_error_response(e.response.text)
+            logger.error(f"Response: {e.response.status_code} - {error_msg}")
         return []
     except Exception as e:
         logger.error(f"Failed to load Arena blocks: {e}")
@@ -461,32 +754,47 @@ def get_image_url(block):
     """Get the best available image URL from Arena block"""
     image_data = block.get("image", {})
 
+    def best_version_url(version_dict):
+        """Get best URL from version dict (prefer src_2x for higher resolution)"""
+        if not version_dict:
+            return None
+        # Prefer 2x version for higher TV resolution
+        src_2x = version_dict.get("src_2x")
+        if src_2x:
+            return src_2x
+        return version_dict.get("src")
+
     # Try original source first (highest quality)
     original_url = image_data.get("src")
     if original_url:
         # Check if it's a CloudFront URL that might have WAF
         if "cloudfront.net" in original_url:
             # Try large variant instead (via images.are.na)
-            large_url = image_data.get("large", {}).get("src")
+            large_url = best_version_url(image_data.get("large"))
             if large_url:
                 logger.info(f"Using large variant URL (bypass CloudFront WAF)")
                 return large_url
         return original_url
 
-    # Fallback to large variant
-    large_url = image_data.get("large", {}).get("src")
+    # Fallback to large variant (with 2x preference)
+    large_url = best_version_url(image_data.get("large"))
     if large_url:
         return large_url
 
     # Fallback to medium
-    medium_url = image_data.get("medium", {}).get("src")
+    medium_url = best_version_url(image_data.get("medium"))
     if medium_url:
         return medium_url
 
     # Fallback to small
-    small_url = image_data.get("small", {}).get("src")
+    small_url = best_version_url(image_data.get("small"))
     if small_url:
         return small_url
+
+    # Fallback to square (sometimes available)
+    square_url = best_version_url(image_data.get("square"))
+    if square_url:
+        return square_url
 
     return None
 
@@ -520,7 +828,8 @@ def download_image(image_url):
     except requests.RequestException as e:
         logger.error(f"Download failed: {e}")
         if hasattr(e, "response") and e.response:
-            logger.error(f"HTTP {e.response.status_code}: {e.response.text[:200]}")
+            error_msg = parse_error_response(e.response.text)
+            logger.error(f"HTTP {e.response.status_code}: {error_msg}")
         return None
 
 
@@ -620,6 +929,13 @@ async def sync_arena_to_tv():
     if not tv_ip:
         logger.error("SMARTTHING_TV_IP_ADDRESS environment variable not set")
         return False
+    # Clean the IP address (strip whitespace and quotes)
+    tv_ip = clean_slug_value(tv_ip)
+    if not tv_ip:
+        logger.error(
+            "SMARTTHING_TV_IP_ADDRESS environment variable is empty after cleaning (may be just whitespace or quotes)"
+        )
+        return False
 
     # Get Are.na token
     token = get_arena_token()
@@ -641,6 +957,15 @@ async def sync_arena_to_tv():
             "Source channel not configured. "
             "Set ARENA_SOURCE_CHANNEL_SLUG environment variable or "
             f"create '{ARENA_SOURCE_CHANNEL_BLOCK_TITLE}' text block in storage channel."
+        )
+        return False
+
+    # Check for placeholder value
+    if actual_source_channel_slug == ARENA_SOURCE_CHANNEL_PLACEHOLDER:
+        logger.error(
+            "Source channel slug is still using the placeholder value. "
+            f"Please update the '{ARENA_SOURCE_CHANNEL_BLOCK_TITLE}' text block "
+            f"in the storage channel with your actual source channel slug."
         )
         return False
 
@@ -904,6 +1229,8 @@ if __name__ == "__main__":
     sync_interval_env = os.getenv("SYNC_INTERVAL")
     sync_interval_default = 300
     if sync_interval_env:
+        # Clean the value (strip whitespace and quotes)
+        sync_interval_env = clean_slug_value(sync_interval_env)
         try:
             sync_interval_default = int(sync_interval_env)
         except ValueError:
@@ -913,12 +1240,17 @@ if __name__ == "__main__":
 
     # Safely parse ARENA_CHANNEL_SLUG environment variable
     channel_slug_env = os.getenv("ARENA_CHANNEL_SLUG")
-    channel_slug_default = "the_frame"
-    if channel_slug_env and channel_slug_env.strip():
-        channel_slug_default = channel_slug_env.strip()
+    channel_slug_default = "framer"
+    if channel_slug_env:
+        channel_slug_default = clean_slug_value(channel_slug_env)
 
     parser = argparse.ArgumentParser(
         description="Sync Are.na images to Samsung Frame TV"
+    )
+    parser.add_argument(
+        "--init",
+        action="store_true",
+        help="Initialize Are.na channels and blocks (does not run sync)",
     )
     parser.add_argument("--once", action="store_true", help="Run sync once and exit")
     parser.add_argument(
@@ -931,24 +1263,41 @@ if __name__ == "__main__":
         "--channel",
         type=str,
         default=channel_slug_default,
-        help='Are.na channel slug (default: ARENA_CHANNEL_SLUG env var or "the_frame")',
+        help='Are.na channel slug (default: ARENA_CHANNEL_SLUG env var or "framer")',
     )
 
     args = parser.parse_args()
 
+    # Handle INIT_MODE environment variable (unless overridden by CLI --init flag)
+    if not args.init:
+        init_mode_env = os.getenv("INIT_MODE", "")
+        if init_mode_env:
+            init_mode_env = clean_slug_value(init_mode_env).lower()
+            if init_mode_env in ("true", "1", "yes"):
+                args.init = True
+                logger.info(
+                    "INIT_MODE environment variable enabled initialization mode"
+                )
+
     # Handle SYNC_ONCE environment variable (unless overridden by CLI --once flag)
     if not args.once:
-        sync_once_env = os.getenv("SYNC_ONCE", "").lower()
-        if sync_once_env in ("true", "1", "yes"):
-            args.once = True
-            logger.info("SYNC_ONCE environment variable enabled single sync mode")
+        sync_once_env = os.getenv("SYNC_ONCE", "")
+        if sync_once_env:
+            sync_once_env = clean_slug_value(sync_once_env).lower()
+            if sync_once_env in ("true", "1", "yes"):
+                args.once = True
+                logger.info("SYNC_ONCE environment variable enabled single sync mode")
 
     # Override channel slug if provided
     if args.channel:
-        ARENA_CHANNEL_SLUG = args.channel.strip()
+        ARENA_CHANNEL_SLUG = clean_slug_value(args.channel)
 
     try:
-        if args.once:
+        if args.init:
+            logger.info("🚀 Running initialization mode")
+            success = asyncio.run(init_arena_channels())
+            sys.exit(0 if success else 1)
+        elif args.once:
             logger.info("🚀 Running single sync cycle")
             success = asyncio.run(sync_arena_to_tv())
             sys.exit(0 if success else 1)

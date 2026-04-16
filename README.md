@@ -16,9 +16,18 @@ This system syncs images from an Are.na channel to a Samsung Frame TV's Art Mode
 
 ## Architecture
 
-- **Storage Channel**: `the_frame` - stores the "ARENA_TV_MAPPINGS" text block
+- **Storage Channel**: `framer` - stores the "ARENA_TV_MAPPINGS" text block
 - **Source Channel**: Configurable via environment variable or Are.na text block - contains image blocks to sync
 - **TV**: Samsung Frame TV at `10.100.0.30`
+
+## Implementation Notes
+
+- **Are.na API v3**: Fully compliant with Are.na API v3 specifications
+- **Channel Privacy**: Storage channel is created as **private** by default (configurable in code)
+- **Pagination**: The sync fetches up to **100 images per page** from Are.na. If your source channel has more than 100 images, only the first 100 will be synced.
+- **Image Quality**: Prefers 2x resolution (`src_2x`) when available for better TV display quality
+- **Error Handling**: Parses Are.na API error responses for clearer debugging
+- **Stateless Design**: All configuration and mappings stored in Are.na text blocks
 
 ## Files
 
@@ -50,7 +59,13 @@ This system syncs images from an Are.na channel to a Samsung Frame TV's Art Mode
    export ARENA_SOURCE_CHANNEL_SLUG="your-source-channel-slug"
    ```
 
-3. **Run sync**:
+3. **Initialize Are.na channels** (first time only):
+   ```bash
+   python3 sync_arena_to_tv.py --init
+   ```
+   This creates the storage channel and configuration blocks on Are.na.
+
+4. **Run sync**:
    ```bash
    python3 sync_arena_to_tv.py --once
    ```
@@ -96,11 +111,71 @@ Create a `.env` file or export variables:
 ```bash
 export SMARTTHING_TV_IP_ADDRESS="10.100.0.30"
 export ARENA_TOKEN="your-arena-api-token"
-export ARENA_CHANNEL_SLUG="the_frame"           # Storage channel for configuration
+export ARENA_CHANNEL_SLUG="framer"           # Storage channel for configuration
 export ARENA_SOURCE_CHANNEL_SLUG="your-source-channel-slug"  # Required: source channel slug
 export SYNC_ONCE="false"                        # Set to "true" or "1" for single sync
 export SYNC_INTERVAL="300"                      # Sync interval in seconds (default: 300)
+export INIT_MODE="false"                        # Set to "true" or "1" to initialize Are.na channels
 ```
+
+**Note:** Environment variable values are automatically cleaned of surrounding quotes and whitespace. If you accidentally include quotes (e.g., `"framer"` instead of `framer`), the script will handle it correctly.
+
+### Initialization
+
+First-time setup requires creating Are.na channels and configuration blocks:
+
+```bash
+# Set required environment variables
+export ARENA_TOKEN="your-arena-api-token"
+export ARENA_SOURCE_CHANNEL_SLUG="your-source-channel-slug"
+export SMARTTHING_TV_IP_ADDRESS="10.100.0.30"
+
+# Run initialization
+python sync_arena_to_tv.py --init
+
+# Or using environment variable
+export INIT_MODE=true
+python sync_arena_to_tv.py
+```
+
+**Note:** The storage channel will be created as **private** by default.
+
+#### Initialization Process
+
+The `--init` flag performs the following actions:
+
+1. **Creates storage channel** (default: "framer") as a private channel
+   - Contains all configuration and mapping data
+   - Private by default for data privacy
+
+2. **Creates source channel configuration block** (`ARENA_SOURCE_CHANNEL_SLUG`)
+   - Stores your source channel slug
+   - If `ARENA_SOURCE_CHANNEL_SLUG` is not set in environment variables, uses placeholder value `your-source-channel-slug`
+   - You must update this block with your actual source channel slug before running sync
+
+3. **Creates empty mapping block** (`ARENA_TV_MAPPINGS`)
+   - Empty JSON structure ready for sync mappings
+   - Will be populated automatically during first sync
+
+4. **Verifies source channel existence**
+   - Checks if your source channel exists
+   - Provides warning if it doesn't exist yet (you should create it)
+
+5. **Prints summary with URLs**
+   - Storage channel URL for configuration
+   - Source channel URL for adding images
+   - Next steps instructions
+
+#### Using Placeholder Values
+
+If `ARENA_SOURCE_CHANNEL_SLUG` is not set, initialization will:
+- Use placeholder value `your-source-channel-slug` in the configuration block
+- Show warning messages indicating you need to update the block
+- Allow you to run initialization without deciding on a source channel name upfront
+
+**Important:** You must update the `ARENA_SOURCE_CHANNEL_SLUG` text block in the storage channel with your actual source channel slug before running the sync.
+
+After initialization, add images to your source channel and run the sync.
 
 ### Text Block Configuration
 
@@ -114,6 +189,7 @@ The system uses text blocks in the storage channel (`ARENA_CHANNEL_SLUG`) for co
    - If present, this value overrides the `ARENA_SOURCE_CHANNEL_SLUG` environment variable
    - Content should be just the channel slug (e.g., `your-source-channel-slug`)
    - If not present, the environment variable is used as fallback (there is no default value)
+   - **Note:** The sync fetches up to 100 images per page. Keep your source channel under 100 images for full sync.
 
 ## Usage
 
@@ -158,15 +234,43 @@ docker build -t arena-tv-sync .
 
 ### Running the Container
 
-#### Single Sync Cycle
-
-Using the `--once` flag:
+#### Using Local Build
 ```bash
 docker run --rm \
   -e SMARTTHING_TV_IP_ADDRESS="10.100.0.30" \
   -e ARENA_TOKEN="your-arena-api-token" \
   arena-tv-sync --once
 ```
+
+#### Using GHCR Image
+```bash
+docker run --rm \
+  -e SMARTTHING_TV_IP_ADDRESS="10.100.0.30" \
+  -e ARENA_TOKEN="your-arena-api-token" \
+  ghcr.io/dshatokhin/framer:latest --once
+```
+
+### Initialization in Docker
+
+To initialize Are.na channels and blocks using Docker:
+
+```bash
+# Using local build
+docker run --rm \
+  -e SMARTTHING_TV_IP_ADDRESS="10.100.0.30" \
+  -e ARENA_TOKEN="your-arena-api-token" \
+  -e ARENA_SOURCE_CHANNEL_SLUG="your-source-channel-slug" \
+  arena-tv-sync --init
+
+# Using GHCR image
+docker run --rm \
+  -e SMARTTHING_TV_IP_ADDRESS="10.100.0.30" \
+  -e ARENA_TOKEN="your-arena-api-token" \
+  -e ARENA_SOURCE_CHANNEL_SLUG="your-source-channel-slug" \
+  ghcr.io/dshatokhin/framer:latest --init
+```
+
+**Note:** After initialization, update the `ARENA_SOURCE_CHANNEL_SLUG` text block in your storage channel if you used a placeholder value.
 
 ## CI/CD with GitHub Actions
 
@@ -322,7 +426,7 @@ python3 -c "
 import os, requests
 token = os.getenv('ARENA_TOKEN')
 headers = {'Authorization': f'Bearer {token}'}
-r = requests.get('https://api.are.na/v3/channels/the_frame', headers=headers)
+r = requests.get('https://api.are.na/v3/channels/framer', headers=headers)
 print(f'Status: {r.status_code}')
 "
 ```
@@ -333,6 +437,7 @@ print(f'Status: {r.status_code}')
 2. **TV not reachable**: Verify IP address and network connectivity
 3. **Are.na API errors**: Check token validity and channel permissions
 4. **Image download failures**: Script uses fallback URLs to bypass CloudFront WAF
+5. **Pagination warnings**: If you see "Only fetching first 100 blocks" warnings, reduce the number of images in your source channel (sync only supports up to 100 images per channel)
 
 ## Development
 

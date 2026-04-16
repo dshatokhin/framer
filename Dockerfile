@@ -13,15 +13,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies for Pillow (build time only)
 RUN apt-get update -qq && \
-    apt-get install -y -qq -o APT::Install-Suggests=0 -o APT::Install-Recommends=0 \
-    gcc \
-    g++ \
-    git \
-    libjpeg-dev \
-    libpng-dev \
-    python3-dev \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+  apt-get install -y -qq -o APT::Install-Suggests=0 -o APT::Install-Recommends=0 \
+  gcc \
+  g++ \
+  git \
+  libjpeg-dev \
+  libpng-dev \
+  python3-dev \
+  zlib1g-dev
 
 # Set working directory
 WORKDIR /app
@@ -43,14 +42,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install runtime dependencies for Pillow
 RUN apt-get update -qq && \
-    apt-get install -y -qq -o APT::Install-Suggests=0 -o APT::Install-Recommends=0 \
-    libjpeg62-turbo \
-    libpng16-16 \
-    libtiff6 \
-    libwebp7 \
-    libfreetype6 \
-    zlib1g \
-    && rm -rf /var/lib/apt/lists/*
+  apt-get install -y -qq -o APT::Install-Suggests=0 -o APT::Install-Recommends=0 \
+  libjpeg62-turbo \
+  libpng16-16 \
+  libtiff6 \
+  libwebp7 \
+  libfreetype6 \
+  zlib1g \
+  && rm -rf /var/lib/apt/lists/*
 
 # Copy Python dependencies from builder
 COPY --from=builder /app/deps /app/deps
