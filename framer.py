@@ -5,6 +5,9 @@ Downloads and uploads new Arena blocks to Frame TV
 Stateless version - stores mappings in Are.na block
 """
 
+# Copyright (c) 2026 Denis Shatokhin
+# SPDX-License-Identifier: MIT
+
 import os
 import sys
 import logging

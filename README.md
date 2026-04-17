@@ -461,9 +461,23 @@ Old scripts and test files have been removed to keep the repository tidy. The sy
 
 ## Acknowledgments
 
-- **Samsung TV WebSocket API**: This project uses the [`samsungtvws`](https://github.com/NickWaterton/samsung-tv-ws-api) library by Nick Waterton for communicating with Samsung Frame TV Art Mode.
+- **Samsung TV WebSocket API**: This project uses the [`samsungtvws`](https://github.com/NickWaterton/samsung-tv-ws-api) library by Nick Waterton (licensed under LGPL-3.0) for communicating with Samsung Frame TV Art Mode.
 - **Are.na API**: The sync relies on the [Are.na v3 API](https://www.are.na/developers) for fetching images and storing configuration.
+
+### Third-Party Licenses
+
+This software includes third-party libraries distributed under their own license terms:
+
+- **`samsungtvws`**: LGPL-3.0 License - [https://github.com/NickWaterton/samsung-tv-ws-api/blob/master/LICENSE](https://github.com/NickWaterton/samsung-tv-ws-api/blob/master/LICENSE)
+  This library is licensed under the GNU Lesser General Public License v3.0 (LGPL-3.0). Users have the right to obtain, modify, and redistribute the source code of this library. The source code is available at the linked GitHub repository.
+- **`requests`**: Apache 2.0 License
+- **`Pillow`**: PIL License (Historical Permission Notice and Disclaimer)
+- **`typing_extensions`**: PSF License
+
+The full text of each license is available in the respective source distributions.
 
 ## License
 
-MIT
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright © 2026 Denis Shatokhin
