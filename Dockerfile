@@ -32,7 +32,7 @@ COPY requirements.txt .
 RUN pip install --quiet --no-cache-dir --no-warn-script-location --target=/app/deps -r requirements.txt
 
 # Copy application code
-COPY sync_arena_to_tv.py .
+COPY framer.py .
 
 # Runtime stage: Python slim with runtime dependencies
 FROM python:3.13-slim
@@ -53,7 +53,7 @@ RUN apt-get update -qq && \
 
 # Copy Python dependencies from builder
 COPY --from=builder /app/deps /app/deps
-COPY --from=builder /app/sync_arena_to_tv.py /app/sync_arena_to_tv.py
+COPY --from=builder /app/framer.py /app/framer.py
 
 # Set Python path to include dependencies
 ENV PYTHONPATH=/app/deps
@@ -66,4 +66,4 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 USER appuser
 
 # Entrypoint: Python script (reads environment variables directly)
-ENTRYPOINT ["python3", "sync_arena_to_tv.py"]
+ENTRYPOINT ["python3", "framer.py"]
