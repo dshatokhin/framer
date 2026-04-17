@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-Arena → Samsung TV Sync Script
+Framer - Are.na to Samsung Frame TV Sync
 Downloads and uploads new Arena blocks to Frame TV
 Stateless version - stores mappings in Are.na block
 """
+
+# Copyright (c) 2026 Denis Shatokhin
+# SPDX-License-Identifier: MIT
 
 import os
 import sys
@@ -601,7 +604,7 @@ async def init_arena_channels() -> bool:
     )
     logger.info(f"   URL: https://are.na/channel/{source_channel_slug}")
     logger.info("2. Run the sync script:")
-    logger.info(f"   python sync_arena_to_tv.py")
+    logger.info(f"   python framer.py")
     logger.info("")
     logger.info("Configuration details:")
     logger.info(f"   - Storage channel slug: {storage_channel_slug}")
@@ -922,7 +925,7 @@ async def delete_tv_artwork(tv_ip, content_ids):
         return False
 
 
-async def sync_arena_to_tv():
+async def sync():
     """Main sync function - stateless, uses Are.na for storage"""
     # Get TV IP from environment
     tv_ip = os.getenv("SMARTTHING_TV_IP_ADDRESS")
@@ -1205,7 +1208,7 @@ async def run_sync_loop(interval_seconds: int = 300):
                 f"🕐 Sync cycle started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
 
-            success = await sync_arena_to_tv()
+            success = await sync()
 
             if not success:
                 logger.error("Sync cycle failed")
@@ -1299,7 +1302,7 @@ if __name__ == "__main__":
             sys.exit(0 if success else 1)
         elif args.once:
             logger.info("🚀 Running single sync cycle")
-            success = asyncio.run(sync_arena_to_tv())
+            success = asyncio.run(sync())
             sys.exit(0 if success else 1)
         else:
             logger.info(f"🔄 Starting continuous sync (interval: {args.interval}s)")

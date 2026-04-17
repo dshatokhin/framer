@@ -31,7 +31,7 @@ This system syncs images from an Are.na channel to a Samsung Frame TV's Art Mode
 
 ## Files
 
-- `sync_arena_to_tv.py` - Main sync script (self-contained)
+- `framer.py` - Main sync script (self-contained)
 - `requirements.txt` - Python dependencies
 - `Dockerfile` - Docker image definition
 - `deploy/k8s-deployment.yaml` - Kubernetes Deployment for continuous operation
@@ -61,13 +61,13 @@ This system syncs images from an Are.na channel to a Samsung Frame TV's Art Mode
 
 3. **Initialize Are.na channels** (first time only):
    ```bash
-   python3 sync_arena_to_tv.py --init
+   python3 framer.py --init
    ```
    This creates the storage channel and configuration blocks on Are.na.
 
 4. **Run sync**:
    ```bash
-   python3 sync_arena_to_tv.py --once
+   python3 framer.py --once
    ```
 
 ## Setup
@@ -131,11 +131,11 @@ export ARENA_SOURCE_CHANNEL_SLUG="your-source-channel-slug"
 export SMARTTHING_TV_IP_ADDRESS="10.100.0.30"
 
 # Run initialization
-python sync_arena_to_tv.py --init
+python framer.py --init
 
 # Or using environment variable
 export INIT_MODE=true
-python sync_arena_to_tv.py
+python framer.py
 ```
 
 **Note:** The storage channel will be created as **private** by default.
@@ -197,19 +197,19 @@ The system uses text blocks in the storage channel (`ARENA_CHANNEL_SLUG`) for co
 
 ```bash
 source venv/bin/activate
-python3 sync_arena_to_tv.py --once
+python3 framer.py --once
 ```
 
 ### Continuous Sync (Default: 5-minute interval)
 
 ```bash
-python3 sync_arena_to_tv.py
+python3 framer.py
 ```
 
 ### Custom Interval (e.g., 10 minutes)
 
 ```bash
-python3 sync_arena_to_tv.py --interval 600
+python3 framer.py --interval 600
 ```
 
 ### Specify Different Channels
@@ -217,7 +217,7 @@ python3 sync_arena_to_tv.py --interval 600
 ```bash
 ARENA_CHANNEL_SLUG="my-storage-channel" \
 ARENA_SOURCE_CHANNEL_SLUG="my-images-channel" \
-python3 sync_arena_to_tv.py --once
+python3 framer.py --once
 ```
 
 ## Docker Deployment
@@ -443,7 +443,7 @@ print(f'Status: {r.status_code}')
 
 ### Testing
 
-The script includes comprehensive logging. For verbose output, modify the logging level in `sync_arena_to_tv.py`:
+The script includes comprehensive logging. For verbose output, modify the logging level in `framer.py`:
 
 ```python
 logging.basicConfig(level=logging.DEBUG, ...)
@@ -459,6 +459,25 @@ logging.basicConfig(level=logging.DEBUG, ...)
 
 Old scripts and test files have been removed to keep the repository tidy. The system is now fully stateless with all configuration and mapping data stored in Are.na blocks.
 
+## Acknowledgments
+
+- **Samsung TV WebSocket API**: This project uses the [`samsungtvws`](https://github.com/NickWaterton/samsung-tv-ws-api) library by Nick Waterton (licensed under LGPL-3.0) for communicating with Samsung Frame TV Art Mode.
+- **Are.na API**: The sync relies on the [Are.na v3 API](https://www.are.na/developers) for fetching images and storing configuration.
+
+### Third-Party Licenses
+
+This software includes third-party libraries distributed under their own license terms:
+
+- **`samsungtvws`**: LGPL-3.0 License - [https://github.com/NickWaterton/samsung-tv-ws-api/blob/master/LICENSE](https://github.com/NickWaterton/samsung-tv-ws-api/blob/master/LICENSE)
+  This library is licensed under the GNU Lesser General Public License v3.0 (LGPL-3.0). Users have the right to obtain, modify, and redistribute the source code of this library. The source code is available at the linked GitHub repository.
+- **`requests`**: Apache 2.0 License
+- **`Pillow`**: PIL License (Historical Permission Notice and Disclaimer)
+- **`typing_extensions`**: PSF License
+
+The full text of each license is available in the respective source distributions.
+
 ## License
 
-MIT
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright © 2026 Denis Shatokhin
